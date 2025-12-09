@@ -1,0 +1,107 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Devices collection - surveillance device reports
+    match /devices/{deviceId} {
+      // Allow anyone to read devices (public crowdsourcing data)
+      allow read: if true;
+      
+      // Allow authenticated users (including anonymous) to create devices
+      allow create: if request.auth != null
+        && validateDeviceData(request.resource.data);
+      
+      // Allow users to update their own submissions OR vote/report inactive
+      allow update: if request.auth != null
+        && (
+          // Owner can update their own submission
+          (request.auth.uid == resource.data.reportedBy.uid && validateDeviceData(request.resource.data))
+          ||
+          // Anyone can vote (thumbs up or report inactive)
+          isVotingUpdate(request.resource.data, resource.data)
+        );
+      
+      // Allow users to delete their own submissions
+      allow delete: if request.auth != null
+        && request.auth.uid == resource.data.reportedBy.uid;
+    }
+    
+    // Helper function to validate device data
+    function validateDeviceData(data) {
+      return data.keys().hasAll(['type', 'latitude', 'longitude', 'createdAt', 'updatedAt', 'reportedBy'])
+        && data.type is string
+        && data.type.size() > 0
+        && data.latitude is number
+        && data.latitude >= -90
+        && data.latitude <= 90
+        && data.longitude is number
+        && data.longitude >= -180
+        && data.longitude <= 180
+        && data.reportedBy is map
+        && data.reportedBy.uid is string
+        && data.reportedBy.uid == request.auth.uid
+        && data.reportedBy.isAnonymous is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (data.address == null || data.address is string)
+        && (data.description == null || data.description is string)
+        && (data.thumbsUp == null || data.thumbsUp is int)
+        && (data.thumbsUpUsers == null || data.thumbsUpUsers is list)
+        && (data.inactiveReports == null || data.inactiveReports is int)
+        && (data.inactiveReportUsers == null || data.inactiveReportUsers is list);
+    }
+    
+    // Helper function to check if update is only for voting/inactive reporting
+    function isVotingUpdate(newData, oldData) {
+      // Ensure critical immutable fields haven't changed
+      let criticalFieldsMatch = newData.type == oldData.type
+        && newData.latitude == oldData.latitude
+        && newData.longitude == oldData.longitude
+        && newData.reportedBy.uid == oldData.reportedBy.uid
+        && newData.createdAt == oldData.createdAt;
+      
+      // Check that updatedAt is present and is a timestamp
+      let hasUpdatedAt = newData.updatedAt is timestamp;
+      
+      // Check that at least one voting field exists and is being updated
+      let hasThumbsUpUpdate = newData.keys().hasAll(['thumbsUp']);
+      let hasInactiveUpdate = newData.keys().hasAll(['inactiveReports']);
+      let hasThumbsUpUsersUpdate = newData.keys().hasAll(['thumbsUpUsers']);
+      let hasInactiveUsersUpdate = newData.keys().hasAll(['inactiveReportUsers']);
+      
+      // At least one voting field must be updated
+      let hasVotingUpdate = hasThumbsUpUpdate || hasInactiveUpdate || hasThumbsUpUsersUpdate || hasInactiveUsersUpdate;
+      
+      // If voting fields exist, validate their types
+      let votingFieldsValid = (!hasThumbsUpUpdate || newData.thumbsUp is int)
+        && (!hasInactiveUpdate || newData.inactiveReports is int)
+        && (!hasThumbsUpUsersUpdate || newData.thumbsUpUsers is list)
+        && (!hasInactiveUsersUpdate || newData.inactiveReportUsers is list);
+      
+      // Ensure address and description haven't changed (allow null/undefined)
+      let addressMatch = !newData.keys().hasAll(['address']) 
+        || newData.address == oldData.address 
+        || (newData.address == null && oldData.address == null);
+      let descriptionMatch = !newData.keys().hasAll(['description']) 
+        || newData.description == oldData.description 
+        || (newData.description == null && oldData.description == null);
+      
+      return criticalFieldsMatch && hasUpdatedAt && hasVotingUpdate && votingFieldsValid && addressMatch && descriptionMatch;
+    }
+    
+    // Users collection (if you want to store additional user data)
+    match /users/{userId} {
+      // Users can read their own data
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // Users can create/update their own document
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Deny all other access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

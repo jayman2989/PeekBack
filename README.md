@@ -79,6 +79,38 @@ firebase deploy --only firestore:rules
 - **Update/Delete access**: Users can only modify their own submissions
 - **Validation**: Enforces required fields and data types for device submissions
 
+## Data Sharing & Integration
+
+PeekBack supports data sharing with other surveillance tracking platforms:
+
+### Import from OpenStreetMap
+
+DeFlock (https://github.com/FoggedLens/deflock) uses OpenStreetMap to store ALPR data. You can import their data into PeekBack:
+
+1. Visit `/data` in the app
+2. Set the geographic bounds for the region you want to import
+3. Click "Import from OSM" to fetch and import ALPR devices from OpenStreetMap
+
+### Export PeekBack Data
+
+Export PeekBack data in multiple formats for sharing:
+
+- **JSON**: Full device data with metadata
+- **CSV**: Spreadsheet-compatible format
+- **GeoJSON**: Standard geographic data format for mapping tools
+
+Visit `/data` to export data.
+
+### Data Format
+
+PeekBack devices include:
+- `type`: Device type (flock, license_plate_reader, traffic_camera, etc.)
+- `latitude` / `longitude`: Geographic coordinates
+- `address`: Optional address string
+- `description`: Optional description
+- `thumbsUp`: Community verification count
+- `inactiveReports`: Reports of device being removed
+
 ## Contributing
 
 This is a public crowdsourcing project. Contributions are welcome!

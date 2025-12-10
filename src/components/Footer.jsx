@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom'
 function Footer() {
   return (
     <footer className="bg-gray-800 text-white mt-auto">
-      <div className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="container mx-auto px-4 py-6 sm:py-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
           <div>
             <div className="flex items-center gap-2 mb-4">
               <img 
@@ -45,14 +45,14 @@ function Footer() {
             </ul>
           </div>
         </div>
-        <div className="border-t border-gray-700 mt-8 pt-6">
-          <div className="bg-blue-900/30 border border-blue-700/50 rounded-lg p-4 mb-4">
-            <p className="text-sm text-blue-100 text-center">
+        <div className="border-t border-gray-700 mt-6 sm:mt-8 pt-4 sm:pt-6">
+          <div className="bg-blue-900/30 border border-blue-700/50 rounded-lg p-3 sm:p-4 mb-3 sm:mb-4">
+            <p className="text-xs sm:text-sm text-blue-100 text-center">
               <strong>🔒 Privacy First:</strong> We don't track your location, collect personal data, or use cookies for tracking. 
               <Link to="/privacy" className="underline ml-1 hover:text-white">Learn more</Link>
             </p>
           </div>
-          <div className="text-center text-gray-400">
+          <div className="text-center text-gray-400 text-xs sm:text-sm">
             <p>&copy; {new Date().getFullYear()} PeekBack. All rights reserved.</p>
           </div>
         </div>

@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { addDevice } from '../firebase/services'
+import { addDevice, geocodeAddress } from '../firebase/services'
 import MapPicker from '../components/MapPicker'
+import SearchAutocomplete from '../components/SearchAutocomplete'
 
 function Submit() {
   const { currentUser } = useAuth()
@@ -15,6 +16,8 @@ function Submit() {
   })
   const [submitting, setSubmitting] = useState(false)
   const [gettingLocation, setGettingLocation] = useState(false)
+  const [searchingAddress, setSearchingAddress] = useState(false)
+  const [addressSearchQuery, setAddressSearchQuery] = useState('')
   const [message, setMessage] = useState({ type: '', text: '' })
 
   const handleChange = (e) => {
@@ -30,7 +33,49 @@ function Submit() {
       ...prev,
       latitude: lat.toString(),
       longitude: lng.toString(),
+      // Clear address search query when manually setting location
+      // (user might want to set a different address)
     }))
+    // Clear address search query when location is manually set
+    if (addressSearchQuery) {
+      setAddressSearchQuery('')
+    }
+  }
+
+  const handleAddressSelect = (suggestion) => {
+    // Update address field and coordinates
+    setFormData(prev => ({
+      ...prev,
+      address: suggestion.displayName,
+      latitude: suggestion.latitude.toString(),
+      longitude: suggestion.longitude.toString(),
+    }))
+    setAddressSearchQuery(suggestion.displayName)
+  }
+
+  const handleAddressSearch = async (e) => {
+    e.preventDefault()
+    if (!addressSearchQuery.trim()) return
+
+    setSearchingAddress(true)
+    try {
+      const result = await geocodeAddress(addressSearchQuery)
+      setFormData(prev => ({
+        ...prev,
+        address: result.displayName,
+        latitude: result.latitude.toString(),
+        longitude: result.longitude.toString(),
+      }))
+      setAddressSearchQuery(result.displayName)
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: 'Address not found. Please try a different search term or click on the map to set location.'
+      })
+      console.error('Address search error:', error)
+    } finally {
+      setSearchingAddress(false)
+    }
   }
 
   const handleSubmit = async (e) => {
@@ -74,13 +119,13 @@ function Submit() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-12 max-w-2xl">
-      <h1 className="text-4xl font-bold text-gray-900 mb-2">Submit a Device</h1>
-      <p className="text-gray-600 mb-4">
+    <div className="container mx-auto px-4 py-8 sm:py-12 max-w-2xl">
+      <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">Submit a Device</h1>
+      <p className="text-sm sm:text-base text-gray-600 mb-4">
         Help build the database by reporting surveillance devices you've spotted.
       </p>
-      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-8">
-        <p className="text-sm text-gray-700">
+      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-6 sm:mb-8">
+        <p className="text-xs sm:text-sm text-gray-700">
           <strong>🔒 Privacy:</strong> Your location is never tracked or stored. Only the device coordinates you choose to submit are saved. 
           <Link to="/privacy" className="text-green-700 hover:text-green-900 underline ml-1">Learn more</Link>
         </p>
@@ -96,7 +141,7 @@ function Submit() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="bg-white p-6 rounded-lg shadow-md">
+      <form onSubmit={handleSubmit} className="bg-white p-4 sm:p-6 rounded-lg shadow-md">
         <div className="mb-6">
           <label htmlFor="type" className="block text-sm font-medium text-gray-700 mb-2">
             Device Type *
@@ -121,6 +166,32 @@ function Submit() {
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Location *
           </label>
+          
+          {/* Address Search */}
+          <div className="mb-4">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <SearchAutocomplete
+                value={addressSearchQuery}
+                onChange={setAddressSearchQuery}
+                onSelect={handleAddressSelect}
+                onSearch={handleAddressSearch}
+                searching={searchingAddress}
+              />
+              <button
+                type="button"
+                onClick={handleAddressSearch}
+                disabled={searchingAddress || !addressSearchQuery.trim()}
+                className="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed whitespace-nowrap"
+              >
+                {searchingAddress ? 'Searching...' : 'Search'}
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">
+              Search for an address to automatically set the location, or click on the map below
+            </p>
+          </div>
+
+          {/* Map Picker */}
           <MapPicker
             latitude={formData.latitude ? parseFloat(formData.latitude) : null}
             longitude={formData.longitude ? parseFloat(formData.longitude) : null}
@@ -128,7 +199,7 @@ function Submit() {
             onGetCurrentLocation={setGettingLocation}
           />
           <p className="mt-2 text-xs text-gray-500">
-            Coordinates are automatically filled when you select a location on the map
+            Coordinates are automatically filled when you search an address or select a location on the map
           </p>
         </div>
 

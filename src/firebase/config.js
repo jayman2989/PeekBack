@@ -32,12 +32,27 @@ const notifyAppCheckReady = () => {
 };
 
 export const waitForAppCheck = () => {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     if (appCheckReady) {
       resolve();
-    } else {
-      appCheckReadyCallbacks.push(resolve);
+      return;
     }
+    
+    // Add timeout to prevent hanging forever (15 seconds max wait)
+    const timeout = setTimeout(() => {
+      console.error('App Check initialization timeout - this should not happen');
+      // Remove this callback from the list if it's still there
+      const index = appCheckReadyCallbacks.indexOf(resolve);
+      if (index > -1) {
+        appCheckReadyCallbacks.splice(index, 1);
+      }
+      reject(new Error('App Check initialization timeout'));
+    }, 15000);
+    
+    appCheckReadyCallbacks.push(() => {
+      clearTimeout(timeout);
+      resolve();
+    });
   });
 };
 
@@ -90,16 +105,28 @@ if (typeof window !== 'undefined') {
           notifyAppCheckReady();
         }
       } else {
-        // reCAPTCHA not loaded yet, wait and retry (max 20 attempts = 2 seconds)
+        // reCAPTCHA not loaded yet, wait and retry (max 50 attempts = 5 seconds)
         if (typeof initAppCheck.retryCount === 'undefined') {
           initAppCheck.retryCount = 0;
         }
-        if (initAppCheck.retryCount < 20) {
+        if (initAppCheck.retryCount < 50) {
           initAppCheck.retryCount++;
           setTimeout(initAppCheck, 100);
         } else {
-          console.warn('App Check: reCAPTCHA failed to load after multiple attempts');
-          // Mark as ready anyway to prevent blocking (might work without App Check)
+          console.warn('App Check: reCAPTCHA failed to load after multiple attempts, proceeding without App Check');
+          // Try to initialize App Check anyway (might work in some cases)
+          try {
+            initializeAppCheck(app, {
+              provider: new ReCaptchaV3Provider('6LffdiYsAAAAABTYCy9a_zsRj-XK7K_P8C-S48Ww'),
+              isTokenAutoRefreshEnabled: true
+            });
+            if (process.env.NODE_ENV === 'development') {
+              self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+            }
+          } catch (err) {
+            console.warn('App Check initialization failed, continuing without it:', err);
+          }
+          // Mark as ready anyway to prevent blocking
           notifyAppCheckReady();
         }
       }
@@ -110,13 +137,33 @@ if (typeof window !== 'undefined') {
     }
   };
 
-  // Start initialization after a short delay to ensure reCAPTCHA script has loaded
+  // Start initialization - check if reCAPTCHA script is already loaded
+  const startInit = () => {
+    // Check if reCAPTCHA script has loaded
+    if (document.querySelector('script[src*="recaptcha"]')) {
+      // Script tag exists, wait a bit for it to load
+      setTimeout(initAppCheck, 300);
+    } else {
+      // Script might not be in DOM yet, wait for it
+      const checkScript = setInterval(() => {
+        if (document.querySelector('script[src*="recaptcha"]')) {
+          clearInterval(checkScript);
+          setTimeout(initAppCheck, 300);
+        }
+      }, 100);
+      
+      // Fallback: start anyway after 2 seconds
+      setTimeout(() => {
+        clearInterval(checkScript);
+        initAppCheck();
+      }, 2000);
+    }
+  };
+  
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      setTimeout(initAppCheck, 500);
-    });
+    document.addEventListener('DOMContentLoaded', startInit);
   } else {
-    setTimeout(initAppCheck, 500);
+    startInit();
   }
 } else {
   // Not in browser, mark as ready immediately

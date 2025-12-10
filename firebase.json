@@ -10,6 +10,13 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "redirects": [
+      {
+        "source": "https://www.peekback.org/**",
+        "destination": "https://peekback.org/:splat",
+        "type": 301
+      }
+    ],
     "rewrites": [
       {
         "source": "**",

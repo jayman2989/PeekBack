@@ -132,7 +132,7 @@ function Privacy() {
           <h2 className="text-2xl font-semibold text-gray-900 mb-4">Questions?</h2>
           <p className="text-gray-700">
             If you have questions about privacy or data collection, please visit our <Link to="/about" className="text-blue-600 hover:text-blue-800 underline">About page</Link> or 
-            check out the <a href="https://github.com" className="text-blue-600 hover:text-blue-800 underline">source code</a> (if available).
+            check out the <a href="https://github.com/jayman2989/PeekBack" className="text-blue-600 hover:text-blue-800 underline">source code</a> (if available).
           </p>
         </section>
 

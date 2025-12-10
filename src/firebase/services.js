@@ -18,6 +18,7 @@ import {
   arrayUnion,
   arrayRemove,
   increment,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from './config';
 
@@ -52,8 +53,7 @@ export async function addDevice(deviceData, user = null) {
       deviceDoc.reportedBy = {
         uid: user.uid,
         isAnonymous: user.isAnonymous,
-        // Only include email if not anonymous
-        email: user.email || null,
+        // Email is NOT stored to protect user privacy
       };
     }
 
@@ -62,6 +62,109 @@ export async function addDevice(deviceData, user = null) {
   } catch (error) {
     console.error('Error adding device:', error);
     throw error;
+  }
+}
+
+/**
+ * Batch add multiple devices (for bulk imports)
+ * @param {Array<Object>} devicesArray - Array of device data objects (should have reportedBy, but timestamps will be added)
+ * @param {Array<string>} documentIds - Optional array of document IDs (must match devicesArray length if provided)
+ * @returns {Promise<void>}
+ */
+export async function batchAddDevices(devicesArray, documentIds = null) {
+  if (!devicesArray || devicesArray.length === 0) {
+    return;
+  }
+
+  // Firestore batch limit is 500 operations
+  if (devicesArray.length > 500) {
+    throw new Error('Batch size exceeds Firestore limit of 500 operations');
+  }
+
+  // If documentIds provided, must match length
+  if (documentIds && documentIds.length !== devicesArray.length) {
+    throw new Error('documentIds array must match devicesArray length');
+  }
+
+  try {
+    const batch = writeBatch(db);
+    const devicesRef = collection(db, DEVICES_COLLECTION);
+
+    devicesArray.forEach((deviceData, index) => {
+      // Use provided document ID or create new one
+      const docRef = documentIds 
+        ? doc(devicesRef, documentIds[index])
+        : doc(devicesRef);
+      
+      // Ensure all required fields are set
+      const deviceDoc = {
+        ...deviceData,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        thumbsUp: deviceData.thumbsUp ?? 0,
+        thumbsUpUsers: deviceData.thumbsUpUsers ?? [],
+        inactiveReports: deviceData.inactiveReports ?? 0,
+        inactiveReportUsers: deviceData.inactiveReportUsers ?? [],
+      };
+      
+      // Use set() with merge to update if exists, create if not
+      // This prevents duplicates when re-importing
+      batch.set(docRef, deviceDoc, { merge: false }); // merge: false means overwrite if exists
+    });
+
+    await batch.commit();
+  } catch (error) {
+    console.error('Error batch adding devices:', error);
+    throw error;
+  }
+}
+
+/**
+ * Check if devices with given document IDs already exist
+ * @param {Array<string>} documentIds - Array of document IDs to check
+ * @returns {Promise<Set<string>>} Set of existing document IDs
+ */
+export async function checkExistingDevices(documentIds) {
+  if (!documentIds || documentIds.length === 0) {
+    return new Set();
+  }
+
+  try {
+    const existingIds = new Set();
+    const devicesRef = collection(db, DEVICES_COLLECTION);
+    
+    // Check documents in parallel batches (Firestore can handle concurrent reads well)
+    // We'll check in batches of 100 to avoid overwhelming the connection
+    const batchSize = 100;
+    
+    for (let i = 0; i < documentIds.length; i += batchSize) {
+      const batch = documentIds.slice(i, i + batchSize);
+      
+      // Check each document ID in parallel
+      const checkPromises = batch.map(async (docId) => {
+        try {
+          const docRef = doc(devicesRef, docId);
+          const docSnap = await getDoc(docRef);
+          return docSnap.exists() ? docId : null;
+        } catch (error) {
+          // If check fails for a specific doc, assume it doesn't exist
+          return null;
+        }
+      });
+      
+      const results = await Promise.all(checkPromises);
+      results.forEach((docId) => {
+        if (docId) {
+          existingIds.add(docId);
+        }
+      });
+    }
+
+    return existingIds;
+  } catch (error) {
+    console.error('Error checking existing devices:', error);
+    // If check fails, return empty set (will try to import anyway)
+    return new Set();
   }
 }
 
@@ -88,7 +191,7 @@ export async function getDevice(deviceId) {
 /**
  * Get all devices
  * @param {Object} options - Query options
- * @param {number} options.limitCount - Maximum number of devices to return
+ * @param {number} options.limitCount - Maximum number of devices to return (null/undefined = no limit)
  * @param {string} options.orderByField - Field to order by (default: 'createdAt')
  * @param {string} options.orderDirection - 'asc' or 'desc' (default: 'desc')
  * @returns {Promise<Array>} Array of device objects
@@ -96,7 +199,7 @@ export async function getDevice(deviceId) {
 export async function getAllDevices(options = {}) {
   try {
     const {
-      limitCount = 100,
+      limitCount = null, // Changed default to null to fetch all devices
       orderByField = 'createdAt',
       orderDirection = 'desc',
     } = options;
@@ -107,7 +210,8 @@ export async function getAllDevices(options = {}) {
       q = query(q, orderBy(orderByField, orderDirection));
     }
     
-    if (limitCount) {
+    // Only apply limit if specified
+    if (limitCount !== null && limitCount !== undefined) {
       q = query(q, limit(limitCount));
     }
 
@@ -204,6 +308,69 @@ export function subscribeToDevices(callback, errorCallback) {
       errorCallback(error);
     }
   });
+}
+
+/**
+ * Get devices within a bounding box (viewport-based loading)
+ * @param {Object} bounds - Bounding box {south, north, west, east}
+ * @param {number} maxDevices - Maximum number of devices to return (default: 10000)
+ * @returns {Promise<Array>} Array of device objects within bounds
+ */
+export async function getDevicesInBounds(bounds, maxDevices = 10000) {
+  try {
+    // Firestore doesn't support native geospatial queries, so we use range queries
+    // This requires a composite index on (latitude, longitude)
+    
+    // Calculate approximate area to determine if we need to limit results
+    const latRange = bounds.north - bounds.south;
+    const lonRange = bounds.east - bounds.west;
+    const area = latRange * lonRange;
+    
+    // For very large areas, use a smaller limit to prevent timeouts
+    let effectiveLimit = maxDevices;
+    if (area > 100) { // Very large area (e.g., entire country)
+      effectiveLimit = 5000;
+    } else if (area > 10) { // Large area (e.g., state)
+      effectiveLimit = 7500;
+    }
+    
+    // Use latitude range as primary filter (more efficient than longitude)
+    // Build query step by step to avoid issues
+    let q = query(collection(db, DEVICES_COLLECTION));
+    q = query(q, where('latitude', '>=', bounds.south));
+    q = query(q, where('latitude', '<=', bounds.north));
+    q = query(q, orderBy('latitude', 'asc'));
+    q = query(q, orderBy('longitude', 'asc'));
+    q = query(q, limit(effectiveLimit));
+
+    // Add timeout to prevent hanging
+    const queryPromise = getDocs(q);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Query timeout')), 10000)
+    );
+    
+    const querySnapshot = await Promise.race([queryPromise, timeoutPromise]);
+    
+    // Filter by longitude client-side (more accurate)
+    const devices = querySnapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter(device => 
+        device.longitude >= bounds.west && 
+        device.longitude <= bounds.east &&
+        device.latitude >= bounds.south &&
+        device.latitude <= bounds.north
+      );
+
+    return devices;
+  } catch (error) {
+    // If composite index doesn't exist or query times out, return empty array
+    // Don't fall back to full fetch - that would be too slow with 88k devices
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('Bounds query failed:', error.message);
+    }
+    // Return empty array instead of throwing - better UX
+    return [];
+  }
 }
 
 /**

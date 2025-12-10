@@ -24,11 +24,17 @@ export function AuthProvider({ children }) {
   const [appCheckReady, setAppCheckReady] = useState(false);
   const [error, setError] = useState(null);
 
-  // Wait for App Check to be ready
+  // Wait for App Check to be ready - DO NOT proceed without it
   useEffect(() => {
-    waitForAppCheck().then(() => {
-      setAppCheckReady(true);
-    });
+    waitForAppCheck()
+      .then(() => {
+        setAppCheckReady(true);
+      })
+      .catch((error) => {
+        console.error('App Check wait failed:', error);
+        setError('App Check initialization failed. Please refresh the page.');
+        // Don't set appCheckReady to true - block the app
+      });
   }, []);
 
   // Automatically sign in anonymously if not signed in

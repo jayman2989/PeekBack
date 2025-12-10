@@ -11,7 +11,7 @@ service cloud.firestore {
       allow create: if request.auth != null
         && validateDeviceData(request.resource.data);
       
-      // Allow users to update their own submissions OR vote/report inactive
+      // Allow users to update their own submissions OR vote/report inactive OR update OSM imports
       allow update: if request.auth != null
         && (
           // Owner can update their own submission
@@ -19,6 +19,9 @@ service cloud.firestore {
           ||
           // Anyone can vote (thumbs up or report inactive)
           isVotingUpdate(request.resource.data, resource.data)
+          ||
+          // Allow updates to OSM-imported devices (for re-imports/updates from OSM)
+          (resource.data.osmId != null && request.resource.data.osmId == resource.data.osmId && validateDeviceData(request.resource.data))
         );
       
       // Allow users to delete their own submissions
@@ -41,10 +44,12 @@ service cloud.firestore {
         && data.reportedBy.uid is string
         && data.reportedBy.uid == request.auth.uid
         && data.reportedBy.isAnonymous is bool
+        // Note: email is intentionally NOT stored in reportedBy for privacy
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && (data.address == null || data.address is string)
         && (data.description == null || data.description is string)
+        && (data.osmId == null || data.osmId is int) // OSM ID for deduplication (optional)
         && (data.thumbsUp == null || data.thumbsUp is int)
         && (data.thumbsUpUsers == null || data.thumbsUpUsers is list)
         && (data.inactiveReports == null || data.inactiveReports is int)

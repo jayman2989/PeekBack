@@ -3,7 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { addDevice } from '../firebase/services'
 
 function QuickSubmitModal({ isOpen, onClose, initialLatitude, initialLongitude, onSuccess }) {
-  const { currentUser } = useAuth()
+  const { currentUser, loading: authLoading } = useAuth()
   const [formData, setFormData] = useState({
     type: 'flock',
     description: '',
@@ -11,7 +11,9 @@ function QuickSubmitModal({ isOpen, onClose, initialLatitude, initialLongitude, 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
-  if (!isOpen) return null
+  if (!isOpen) {
+    return null
+  }
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -23,14 +25,35 @@ function QuickSubmitModal({ isOpen, onClose, initialLatitude, initialLongitude, 
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    
+    if (!currentUser) {
+      setError('Please wait while we initialize...')
+      return
+    }
+    
+    // Validate coordinates
+    const lat = parseFloat(initialLatitude)
+    const lng = parseFloat(initialLongitude)
+    
+    if (isNaN(lat) || isNaN(lng)) {
+      setError('Invalid coordinates. Please try again.')
+      return
+    }
+    
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      setError('Coordinates out of valid range.')
+      return
+    }
+    
     setSubmitting(true)
     setError('')
 
     try {
       const deviceData = {
         type: formData.type,
-        latitude: initialLatitude,
-        longitude: initialLongitude,
+        latitude: lat,
+        longitude: lng,
+        address: null, // Explicitly set to null to match normal form
         description: formData.description || null,
       }
 
@@ -47,8 +70,20 @@ function QuickSubmitModal({ isOpen, onClose, initialLatitude, initialLongitude, 
       }
       onClose()
     } catch (err) {
-      setError('Failed to submit device. Please try again.')
-      console.error('Submission error:', err)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Submission error details:', {
+          error: err,
+          message: err.message,
+          code: err.code,
+          user: currentUser?.uid,
+          deviceData: {
+            type: formData.type,
+            latitude: lat,
+            longitude: lng
+          }
+        })
+      }
+      setError(`Failed to submit device: ${err.message || 'Please try again.'}`)
     } finally {
       setSubmitting(false)
     }
@@ -124,10 +159,10 @@ function QuickSubmitModal({ isOpen, onClose, initialLatitude, initialLongitude, 
               </button>
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || authLoading || !currentUser}
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
-                {submitting ? 'Submitting...' : 'Submit'}
+                {authLoading ? 'Initializing...' : submitting ? 'Submitting...' : 'Submit'}
               </button>
             </div>
           </form>

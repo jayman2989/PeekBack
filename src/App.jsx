@@ -7,6 +7,7 @@ import Submit from './pages/Submit'
 import Map from './pages/Map'
 import Privacy from './pages/Privacy'
 import About from './pages/About'
+import AboutDevices from './pages/AboutDevices'
 import DataManagement from './pages/DataManagement'
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
                   <Route path="/submit" element={<Submit />} />
                   <Route path="/privacy" element={<Privacy />} />
                   <Route path="/about" element={<About />} />
+                  <Route path="/devices" element={<AboutDevices />} />
                   <Route path="/data" element={<DataManagement />} />
                 </Routes>
               </main>

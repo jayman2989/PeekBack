@@ -34,6 +34,9 @@ function Header() {
             <Link to="/about" className="text-gray-700 hover:text-gray-900 font-medium text-sm lg:text-base">
               About
             </Link>
+            <Link to="/devices" className="text-gray-700 hover:text-gray-900 font-medium text-sm lg:text-base">
+              Devices
+            </Link>
             <Link to="/privacy" className="text-gray-700 hover:text-gray-900 font-medium text-sm lg:text-base">
               Privacy
             </Link>
@@ -96,6 +99,13 @@ function Header() {
                 onClick={() => setMobileMenuOpen(false)}
               >
                 About
+              </Link>
+              <Link
+                to="/devices"
+                className="text-gray-700 hover:text-gray-900 font-medium py-2 px-2 rounded-md hover:bg-gray-50"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Devices
               </Link>
               <Link
                 to="/privacy"

@@ -40,7 +40,7 @@ function Footer() {
                 <Link to="/privacy" className="hover:text-white">Privacy Policy</Link>
               </li>
               <li>
-                <a href="#" className="hover:text-white">Contribute</a>
+                <a href="https://github.com/jayman2989/PeekBack" className="hover:text-white">Contribute</a>
               </li>
             </ul>
           </div>

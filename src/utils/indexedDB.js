@@ -48,30 +48,170 @@ export function openDB() {
 
 /**
  * Store all devices in IndexedDB
+ * Optimized for performance with large datasets by:
+ * - Processing in batches to avoid blocking the UI
+ * - Using put() which is faster than add() for updates
+ * - Efficiently handling full refreshes vs incremental updates
+ * @param {Array} devices - Array of device objects to store
+ * @param {boolean} isFullRefresh - If true, clears store first (faster for full replacements)
  */
-export async function storeDevices(devices) {
+export async function storeDevices(devices, isFullRefresh = false) {
+  if (!devices || devices.length === 0) {
+    // If full refresh with no devices, clear the store
+    if (isFullRefresh) {
+      try {
+        const db = await openDB()
+        const transaction = db.transaction([STORE_NAME], 'readwrite')
+        const store = transaction.objectStore(STORE_NAME)
+        await new Promise((resolve, reject) => {
+          const clearRequest = store.clear()
+          clearRequest.onsuccess = () => resolve()
+          clearRequest.onerror = () => reject(clearRequest.error)
+        })
+      } catch (error) {
+        console.error('Error clearing IndexedDB:', error)
+      }
+    }
+    await storeCacheMetadata({
+      timestamp: Date.now(),
+      deviceCount: 0
+    })
+    return true
+  }
+
   try {
     const db = await openDB()
-    const transaction = db.transaction([STORE_NAME], 'readwrite')
-    const store = transaction.objectStore(STORE_NAME)
-
-    // Clear existing devices
-    await new Promise((resolve, reject) => {
-      const clearRequest = store.clear()
-      clearRequest.onsuccess = () => resolve()
-      clearRequest.onerror = () => reject(clearRequest.error)
-    })
-
-    // Add all devices
-    const promises = devices.map(device => {
-      return new Promise((resolve, reject) => {
-        const request = store.add(device)
-        request.onsuccess = () => resolve()
-        request.onerror = () => reject(request.error)
+    
+    // For full refreshes, clear first (can be faster than individual deletes)
+    if (isFullRefresh) {
+      const transaction = db.transaction([STORE_NAME], 'readwrite')
+      const store = transaction.objectStore(STORE_NAME)
+      await new Promise((resolve, reject) => {
+        const clearRequest = store.clear()
+        clearRequest.onsuccess = () => resolve()
+        clearRequest.onerror = () => reject(clearRequest.error)
       })
-    })
-
-    await Promise.all(promises)
+    }
+    
+    // Process in batches to avoid blocking and improve performance
+    // IndexedDB transactions are more efficient when operations are batched
+    const BATCH_SIZE = 2000 // Process 2000 devices per batch (increased from 1000)
+    const totalBatches = Math.ceil(devices.length / BATCH_SIZE)
+    
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const start = batchIndex * BATCH_SIZE
+      const end = Math.min(start + BATCH_SIZE, devices.length)
+      const batch = devices.slice(start, end)
+      
+      // Use a single transaction per batch for better performance
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction([STORE_NAME], 'readwrite')
+        const store = transaction.objectStore(STORE_NAME)
+        
+        // Track completed operations
+        let completed = 0
+        let hasError = false
+        
+        // Use put() instead of add() - this will update existing records and add new ones
+        // For full refresh, we already cleared, but put() is still safe and efficient
+        batch.forEach(device => {
+          const request = store.put(device)
+          request.onsuccess = () => {
+            completed++
+            // Resolve when all operations in this batch complete
+            if (completed === batch.length && !hasError) {
+              resolve()
+            }
+          }
+          request.onerror = () => {
+            if (!hasError) {
+              hasError = true
+              reject(request.error)
+            }
+          }
+        })
+        
+        // Fallback: resolve on transaction complete if all operations succeeded
+        transaction.oncomplete = () => {
+          if (completed === batch.length && !hasError) {
+            resolve()
+          }
+        }
+        
+        transaction.onerror = () => {
+          if (!hasError) {
+            hasError = true
+            reject(transaction.error)
+          }
+        }
+      })
+      
+      // Yield to event loop between batches to keep UI responsive
+      // Only yield if there are more batches to process
+      if (batchIndex < totalBatches - 1) {
+        await new Promise(resolve => setTimeout(resolve, 0))
+      }
+    }
+    
+    // For incremental updates (not full refresh), remove devices that are no longer present
+    if (!isFullRefresh) {
+      const existingDevices = await getAllDevices()
+      const newDeviceIds = new Set(devices.map(d => d.id))
+      const devicesToRemove = existingDevices.filter(d => d.id !== CACHE_META_KEY && !newDeviceIds.has(d.id))
+      
+      if (devicesToRemove.length > 0) {
+        // Delete in batches
+        const DELETE_BATCH_SIZE = 2000
+        const deleteBatches = Math.ceil(devicesToRemove.length / DELETE_BATCH_SIZE)
+        
+        for (let i = 0; i < deleteBatches; i++) {
+          const start = i * DELETE_BATCH_SIZE
+          const end = Math.min(start + DELETE_BATCH_SIZE, devicesToRemove.length)
+          const deleteBatch = devicesToRemove.slice(start, end)
+          
+          await new Promise((resolve, reject) => {
+            const transaction = db.transaction([STORE_NAME], 'readwrite')
+            const store = transaction.objectStore(STORE_NAME)
+            
+            let completed = 0
+            let hasError = false
+            
+            deleteBatch.forEach(device => {
+              const request = store.delete(device.id)
+              request.onsuccess = () => {
+                completed++
+                if (completed === deleteBatch.length && !hasError) {
+                  resolve()
+                }
+              }
+              request.onerror = () => {
+                if (!hasError) {
+                  hasError = true
+                  reject(request.error)
+                }
+              }
+            })
+            
+            transaction.oncomplete = () => {
+              if (completed === deleteBatch.length && !hasError) {
+                resolve()
+              }
+            }
+            
+            transaction.onerror = () => {
+              if (!hasError) {
+                hasError = true
+                reject(transaction.error)
+              }
+            }
+          })
+          
+          if (i < deleteBatches - 1) {
+            await new Promise(resolve => setTimeout(resolve, 0))
+          }
+        }
+      }
+    }
 
     // Store cache metadata
     await storeCacheMetadata({

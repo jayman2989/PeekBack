@@ -380,7 +380,7 @@ function Map() {
         
         // Store in IndexedDB (this can also take a while with large datasets)
         setLoadingProgress({ current: validDevices.length, total: validDevices.length, message: 'Storing in local cache...' })
-        await storeDevices(validDevices)
+        await storeDevices(validDevices, true) // true = full refresh, clears store first for better performance
         
         if (process.env.NODE_ENV === 'development') {
           console.log(`Stored ${validDevices.length} devices in IndexedDB`)
